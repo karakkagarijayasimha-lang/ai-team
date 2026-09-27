@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 from dotenv import load_dotenv
 from google import genai
@@ -16,6 +17,9 @@ gemini_client = genai.Client(
 
 MAX_IMPROVEMENT_ROUNDS = 3
 MAX_APPROVAL_ROUNDS = 3
+MAX_CONTEXT_TURNS = 10
+
+OPENROUTER_MAX_RETRIES = 4
 
 
 # ============================================================
@@ -36,42 +40,176 @@ def ask_gemini(prompt):
 # ============================================================
 
 def ask_openrouter(prompt):
-    response = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers={
-            "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
-            "Content-Type": "application/json"
-        },
-        json={
-            "model": "openrouter/free",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ]
-        },
-        timeout=120
+
+    for attempt in range(OPENROUTER_MAX_RETRIES):
+
+        try:
+
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": (
+                        f"Bearer {os.getenv('OPENROUTER_API_KEY')}"
+                    ),
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "openrouter/free",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ]
+                },
+                timeout=120
+            )
+
+            # ------------------------------------------------
+            # RATE LIMIT — HTTP 429
+            # ------------------------------------------------
+
+            if response.status_code == 429:
+
+                if attempt < OPENROUTER_MAX_RETRIES - 1:
+
+                    wait_time = 5 * (2 ** attempt)
+
+                    print(
+                        "\n[OpenRouter] Rate limit reached."
+                    )
+
+                    print(
+                        f"[OpenRouter] Retrying in "
+                        f"{wait_time} seconds..."
+                    )
+
+                    time.sleep(wait_time)
+
+                    continue
+
+                raise RuntimeError(
+                    "OpenRouter is still rate-limited after "
+                    "multiple attempts."
+                )
+
+            # ------------------------------------------------
+            # OTHER HTTP ERRORS
+            # ------------------------------------------------
+
+            response.raise_for_status()
+
+            # ------------------------------------------------
+            # READ RESPONSE
+            # ------------------------------------------------
+
+            data = response.json()
+
+            return data["choices"][0]["message"]["content"].strip()
+
+        except requests.exceptions.Timeout:
+
+            if attempt < OPENROUTER_MAX_RETRIES - 1:
+
+                wait_time = 5 * (2 ** attempt)
+
+                print(
+                    "\n[OpenRouter] Request timed out."
+                )
+
+                print(
+                    f"[OpenRouter] Retrying in "
+                    f"{wait_time} seconds..."
+                )
+
+                time.sleep(wait_time)
+
+            else:
+
+                raise RuntimeError(
+                    "OpenRouter request timed out after "
+                    "multiple attempts."
+                )
+
+        except requests.exceptions.RequestException as error:
+
+            if attempt < OPENROUTER_MAX_RETRIES - 1:
+
+                wait_time = 5 * (2 ** attempt)
+
+                print(
+                    "\n[OpenRouter] Request failed."
+                )
+
+                print(
+                    f"[OpenRouter] Retrying in "
+                    f"{wait_time} seconds..."
+                )
+
+                time.sleep(wait_time)
+
+            else:
+
+                raise RuntimeError(
+                    f"OpenRouter request failed: {error}"
+                )
+
+    raise RuntimeError(
+        "OpenRouter request failed."
     )
 
-    response.raise_for_status()
 
-    data = response.json()
+# ============================================================
+# CONVERSATION CONTEXT
+# ============================================================
 
-    return data["choices"][0]["message"]["content"].strip()
+def format_conversation_history(conversation_history):
+
+    if not conversation_history:
+        return "No previous conversation."
+
+    recent_history = conversation_history[
+        -MAX_CONTEXT_TURNS:
+    ]
+
+    formatted = []
+
+    for item in recent_history:
+
+        formatted.append(
+            f"USER:\n{item['user']}\n\n"
+            f"AI TEAM:\n{item['assistant']}"
+        )
+
+    return (
+        "\n\n"
+        "--- PREVIOUS TURN ---"
+        "\n\n"
+    ).join(formatted)
 
 
 # ============================================================
 # FIND IMPROVEMENTS
 # ============================================================
 
-def find_improvements(agent_name, question, own_answer, other_answer):
+def find_improvements(
+    agent_name,
+    question,
+    own_answer,
+    other_answer,
+    conversation_context
+):
 
     prompt = f"""
 You are {agent_name}, an equal member of a two-agent AI team.
 
-USER QUESTION:
+You are helping answer the user's CURRENT question.
+
+CURRENT USER QUESTION:
 {question}
+
+RELEVANT PREVIOUS CONVERSATION:
+{conversation_context}
 
 YOUR CURRENT ANSWER:
 {own_answer}
@@ -79,13 +217,13 @@ YOUR CURRENT ANSWER:
 OTHER AGENT'S CURRENT ANSWER:
 {other_answer}
 
-
-Your job in this stage is NOT to simply approve your answer.
+Your job is NOT to simply approve your answer.
 
 Your job is to aggressively search for genuine ways to make your answer
-better for the user.
+better for THIS user and THIS question.
 
-Think deeply about the actual question and the actual answers.
+Think deeply about the actual question, the previous conversation,
+your answer, and the other agent's answer.
 
 Look for:
 
@@ -99,12 +237,27 @@ Look for:
 8. Poor organization
 9. Unnecessary information
 10. Repetition
-11. Better examples that would improve understanding
+11. Better examples that genuinely improve understanding
 12. Important edge cases
 13. Important assumptions
-14. Whether the answer actually satisfies the user's intention
-15. Whether something from the other agent's answer is genuinely better
-   and should be incorporated
+14. Whether the answer satisfies the user's actual intention
+15. Whether something from the other agent's answer is genuinely
+    better and should be incorporated
+16. Whether the answer is unnecessarily technical or verbose
+
+IMPORTANT QUALITY RULE:
+
+Do NOT improve the answer merely by adding more information.
+
+For every possible improvement, ask:
+
+"Would this genuinely make the answer more useful to THIS user
+for THIS question?"
+
+If the answer is no, do not recommend it.
+
+Prefer the minimum amount of information needed to give an excellent,
+accurate and useful answer.
 
 IMPORTANT:
 
@@ -116,17 +269,23 @@ IMPORTANT:
 - If the other agent has useful information, consider incorporating it.
 - If the other agent is wrong, do NOT copy it.
 - Use your own reasoning to decide what is actually correct.
-- Focus on improving QUALITY, not QUANTITY.
+- Do not add advanced information merely because it is technically
+  interesting.
+- Do not repeat information the user already understands.
+- Focus on QUALITY, not QUANTITY.
 
 Think like a perfectionist teammate:
 
 "What can I genuinely improve in my answer after seeing the other
 agent's answer?"
 
-Return ONLY a concise list of the specific improvements that should
-be made.
+Return ONLY one of these two formats:
 
-If you find no meaningful improvement, return:
+IMPROVEMENTS:
+1. specific genuine improvement
+2. specific genuine improvement
+
+OR exactly:
 
 NO_MEANINGFUL_IMPROVEMENT
 """
@@ -146,14 +305,18 @@ def apply_improvements(
     question,
     current_answer,
     other_answer,
-    improvement_points
+    improvement_points,
+    conversation_context
 ):
 
     prompt = f"""
 You are {agent_name}, an equal member of a two-agent AI team.
 
-USER QUESTION:
+CURRENT USER QUESTION:
 {question}
+
+RELEVANT PREVIOUS CONVERSATION:
+{conversation_context}
 
 YOUR CURRENT ANSWER:
 {current_answer}
@@ -163,7 +326,6 @@ OTHER AGENT'S ANSWER:
 
 YOUR IDENTIFIED IMPROVEMENTS:
 {improvement_points}
-
 
 Now produce a genuinely improved version of your answer.
 
@@ -180,12 +342,20 @@ Rules:
 - Keep correct information that is already strong.
 - Do NOT blindly apply an improvement if it is actually wrong.
 - Do NOT add information just to make the answer longer.
+- Do NOT add advanced details merely because they are interesting.
 - Do NOT remove useful information just to make it shorter.
+- Keep the level of detail appropriate to the actual question.
+- Use previous conversation when it genuinely helps.
+- Do not unnecessarily repeat previous answers.
 - Make the answer clear, natural, accurate and useful.
 - Answer the user's actual intention.
 - Do not mention this collaboration.
 - Do not mention the other agent.
 - Do not describe what you changed.
+
+IMPORTANT:
+
+Quality is more important than quantity.
 
 Return ONLY the improved answer.
 """
@@ -200,20 +370,27 @@ Return ONLY the improved answer.
 # CREATE TEAM DRAFT
 # ============================================================
 
-def create_team_draft(question, answer1, answer2):
+def create_team_draft(
+    question,
+    answer1,
+    answer2,
+    conversation_context
+):
 
     prompt = f"""
 You are creating a shared TEAM DRAFT from two equal AI teammates.
 
-USER QUESTION:
+CURRENT USER QUESTION:
 {question}
+
+RELEVANT PREVIOUS CONVERSATION:
+{conversation_context}
 
 AGENT 1 ANSWER:
 {answer1}
 
 AGENT 2 ANSWER:
 {answer2}
-
 
 Create ONE high-quality answer for the user.
 
@@ -229,14 +406,27 @@ Instead:
 - Preserve every important point.
 - Correct factual problems.
 - Reject incorrect information from either agent.
-- Include useful examples when they genuinely help.
+- Include examples when they genuinely help.
 - Keep the answer focused on the user's actual intention.
+- Use previous conversation when it is relevant.
 - Avoid unnecessary verbosity.
 - Do not omit important information merely to be concise.
+- Do not add technically interesting information unless it helps
+  answer the actual question.
+- Keep the depth proportional to what the user needs.
 - Make the result natural and easy to understand.
 - Do not mention the agents.
 - Do not mention collaboration.
 - Do not say "Agent 1 says..." or "Agent 2 says..."
+
+QUALITY TEST:
+
+Before including a sentence, ask:
+
+"Does this sentence genuinely help the user understand or answer
+their current question?"
+
+If not, leave it out.
 
 The final draft should feel like ONE excellent answer written directly
 for the user.
@@ -251,19 +441,26 @@ Return ONLY the team draft.
 # AGGRESSIVE TEAM DRAFT REVIEW
 # ============================================================
 
-def review_team_draft(agent_name, question, team_draft):
+def review_team_draft(
+    agent_name,
+    question,
+    team_draft,
+    conversation_context
+):
 
     prompt = f"""
 You are {agent_name}, one of two equal AI teammates.
 
 The following is the EXACT SAME TEAM DRAFT that the user may receive.
 
-USER QUESTION:
+CURRENT USER QUESTION:
 {question}
+
+RELEVANT PREVIOUS CONVERSATION:
+{conversation_context}
 
 TEAM DRAFT:
 {team_draft}
-
 
 Now aggressively inspect this draft.
 
@@ -285,9 +482,11 @@ Check:
 - unnecessary verbosity
 - unnecessary repetition
 - inappropriate technical depth
+- unnecessary advanced information
 - weak examples
 - missing examples where one is genuinely needed
 - whether it actually answers the user's intention
+- whether previous conversation is handled correctly
 - whether any statement should be corrected or qualified
 
 IMPORTANT:
@@ -295,17 +494,20 @@ IMPORTANT:
 Do not request changes merely because you personally prefer different
 wording.
 
-Only identify genuine improvements.
+Do not request extra information simply because it is technically
+interesting.
+
+Only identify changes that would genuinely make the answer better
+for THIS user and THIS question.
 
 If there are genuine problems, return:
 
 REVISE:
-1. ...
-2. ...
-3. ...
+1. specific problem and useful correction
+2. specific problem and useful correction
 
-If after serious inspection the draft has no meaningful problems, return
-exactly:
+If after serious inspection the draft has no meaningful problems,
+return exactly:
 
 APPROVED
 
@@ -327,15 +529,19 @@ def revise_team_draft(
     current_draft,
     gemini_review,
     openrouter_review,
-    revision_agent
+    revision_agent,
+    conversation_context
 ):
 
     prompt = f"""
 You are {revision_agent}, revising a shared answer created by two equal
 AI teammates.
 
-USER QUESTION:
+CURRENT USER QUESTION:
 {question}
+
+RELEVANT PREVIOUS CONVERSATION:
+{conversation_context}
 
 CURRENT TEAM DRAFT:
 {current_draft}
@@ -345,7 +551,6 @@ GEMINI REVIEW:
 
 OPENROUTER REVIEW:
 {openrouter_review}
-
 
 Create the next version of the team draft.
 
@@ -361,12 +566,22 @@ Rules:
 - Resolve contradictions.
 - Improve clarity where genuinely needed.
 - Keep the answer natural.
+- Keep the answer focused on the current question.
 - Do not make it longer without a reason.
+- Do not add advanced information merely because it is interesting.
 - Do not make it shorter if important information would be lost.
 - Do not introduce unrelated information.
+- Use previous conversation only when relevant.
 - Do not mention the reviews.
 - Do not mention the agents.
 - Do not describe the revision process.
+
+QUALITY TEST:
+
+The goal is NOT to maximize the amount of information.
+
+The goal is to produce the most useful answer for the user's actual
+question.
 
 Return ONLY the revised team draft.
 """
@@ -378,24 +593,20 @@ Return ONLY the revised team draft.
 
 
 # ============================================================
-# MAIN
+# ANSWER ONE QUESTION
 # ============================================================
 
-def main():
+def answer_question(
+    question,
+    conversation_history
+):
 
-    print("\n" + "=" * 60)
-    print("                 AI TEAM")
-    print("=" * 60)
-
-    question = input("\nEnter your question: ").strip()
-
-    if not question:
-        print("\nPlease enter a question.")
-        return
-
+    conversation_context = format_conversation_history(
+        conversation_history
+    )
 
     # ========================================================
-    # STEP 1 — INDEPENDENT ANSWERS
+    # STEP 1 — INDEPENDENT THINKING
     # ========================================================
 
     print("\n" + "=" * 60)
@@ -405,11 +616,15 @@ def main():
     answer1_prompt = f"""
 You are Agent 1, an independent member of an AI team.
 
-Answer this user question:
-
+CURRENT USER QUESTION:
 {question}
 
-Give your best possible answer.
+RELEVANT PREVIOUS CONVERSATION:
+{conversation_context}
+
+Answer the user's current question independently.
+
+Use previous conversation only when it is relevant.
 
 Priorities:
 
@@ -420,6 +635,9 @@ Priorities:
 - Natural language
 - Useful structure
 - Appropriate detail
+- Quality over quantity
+
+Do not unnecessarily repeat previous answers.
 
 Do not mention the AI team.
 Do not mention collaboration.
@@ -430,11 +648,15 @@ Return ONLY the answer.
     answer2_prompt = f"""
 You are Agent 2, an independent member of an AI team.
 
-Answer this user question independently:
-
+CURRENT USER QUESTION:
 {question}
 
-Give your best possible answer.
+RELEVANT PREVIOUS CONVERSATION:
+{conversation_context}
+
+Answer the user's current question independently.
+
+Use previous conversation only when it is relevant.
 
 Priorities:
 
@@ -445,6 +667,9 @@ Priorities:
 - Natural language
 - Useful structure
 - Appropriate detail
+- Quality over quantity
+
+Do not unnecessarily repeat previous answers.
 
 Do not mention the AI team.
 Do not mention collaboration.
@@ -453,95 +678,120 @@ Return ONLY the answer.
 """
 
     answer1 = ask_gemini(answer1_prompt)
-    answer2 = ask_openrouter(answer2_prompt)
 
     print("\n--- AGENT 1 — GEMINI ---")
     print(answer1)
 
+    answer2 = ask_openrouter(answer2_prompt)
+
     print("\n--- AGENT 2 — OPENROUTER ---")
     print(answer2)
-
 
     # ========================================================
     # STEP 2 — ACTIVE IMPROVEMENT LOOP
     # ========================================================
 
-    for round_number in range(1, MAX_IMPROVEMENT_ROUNDS + 1):
+    for round_number in range(
+        1,
+        MAX_IMPROVEMENT_ROUNDS + 1
+    ):
 
         print("\n" + "=" * 60)
-        print(f"STEP 2 — IMPROVEMENT ROUND {round_number}")
+        print(
+            f"STEP 2 — IMPROVEMENT ROUND {round_number}"
+        )
         print("=" * 60)
 
         # ----------------------------------------------------
-        # Both agents actively search for improvements
+        # IMPORTANT:
+        # Both agents inspect the SAME previous state.
         # ----------------------------------------------------
+
+        previous_answer1 = answer1
+        previous_answer2 = answer2
 
         gemini_improvements = find_improvements(
             "Gemini",
             question,
-            answer1,
-            answer2
+            previous_answer1,
+            previous_answer2,
+            conversation_context
         )
 
         openrouter_improvements = find_improvements(
             "OpenRouter",
             question,
-            answer2,
-            answer1
+            previous_answer2,
+            previous_answer1,
+            conversation_context
         )
 
-        print("\n--- GEMINI: WHAT CAN I IMPROVE? ---")
+        print(
+            "\n--- GEMINI: WHAT CAN I IMPROVE? ---"
+        )
+
         print(gemini_improvements)
 
-        print("\n--- OPENROUTER: WHAT CAN I IMPROVE? ---")
+        print(
+            "\n--- OPENROUTER: WHAT CAN I IMPROVE? ---"
+        )
+
         print(openrouter_improvements)
 
-
         # ----------------------------------------------------
-        # If both genuinely find nothing, stop.
-        #
-        # This is NOT the main decision mechanism.
-        # Agents are first forced to actively search.
+        # If both find nothing meaningful, stop.
         # ----------------------------------------------------
 
         if (
-            "NO_MEANINGFUL_IMPROVEMENT" in
-            gemini_improvements.upper()
+            "NO_MEANINGFUL_IMPROVEMENT"
+            in gemini_improvements.upper()
             and
-            "NO_MEANINGFUL_IMPROVEMENT" in
-            openrouter_improvements.upper()
+            "NO_MEANINGFUL_IMPROVEMENT"
+            in openrouter_improvements.upper()
         ):
 
-            print("\nBOTH AGENTS FOUND NO MEANINGFUL IMPROVEMENT.")
+            print(
+                "\nBOTH AGENTS FOUND NO MEANINGFUL IMPROVEMENT."
+            )
+
             break
 
-
         # ----------------------------------------------------
-        # Each agent improves its OWN answer.
+        # Both improve from SAME previous state.
         # ----------------------------------------------------
 
-        answer1 = apply_improvements(
+        improved_answer1 = apply_improvements(
             "Gemini",
             question,
-            answer1,
-            answer2,
-            gemini_improvements
+            previous_answer1,
+            previous_answer2,
+            gemini_improvements,
+            conversation_context
         )
 
-        answer2 = apply_improvements(
+        improved_answer2 = apply_improvements(
             "OpenRouter",
             question,
-            answer2,
-            answer1,
-            openrouter_improvements
+            previous_answer2,
+            previous_answer1,
+            openrouter_improvements,
+            conversation_context
         )
 
-        print("\n--- GEMINI — IMPROVED ANSWER ---")
+        answer1 = improved_answer1
+        answer2 = improved_answer2
+
+        print(
+            "\n--- GEMINI — IMPROVED ANSWER ---"
+        )
+
         print(answer1)
 
-        print("\n--- OPENROUTER — IMPROVED ANSWER ---")
-        print(answer2)
+        print(
+            "\n--- OPENROUTER — IMPROVED ANSWER ---"
+        )
 
+        print(answer2)
 
     # ========================================================
     # STEP 3 — TEAM DRAFT
@@ -554,54 +804,67 @@ Return ONLY the answer.
     team_draft = create_team_draft(
         question,
         answer1,
-        answer2
+        answer2,
+        conversation_context
     )
 
     print("\n--- SHARED TEAM DRAFT ---")
     print(team_draft)
 
-
     # ========================================================
-    # STEP 4 — AGGRESSIVE MUTUAL REVIEW
+    # STEP 4 — MUTUAL REVIEW
     # ========================================================
 
     approved = False
 
-    for approval_round in range(1, MAX_APPROVAL_ROUNDS + 1):
+    for approval_round in range(
+        1,
+        MAX_APPROVAL_ROUNDS + 1
+    ):
 
         print("\n" + "=" * 60)
-        print(f"STEP 4 — TEAM DRAFT REVIEW {approval_round}")
+        print(
+            f"STEP 4 — TEAM DRAFT REVIEW {approval_round}"
+        )
         print("=" * 60)
 
-        # BOTH agents receive the EXACT SAME draft.
+        # BOTH agents receive EXACTLY the same draft.
 
         gemini_review = review_team_draft(
             "Gemini",
             question,
-            team_draft
+            team_draft,
+            conversation_context
         )
 
         openrouter_review = review_team_draft(
             "OpenRouter",
             question,
-            team_draft
+            team_draft,
+            conversation_context
         )
 
-        print("\n--- GEMINI — AGGRESSIVE REVIEW ---")
+        print(
+            "\n--- GEMINI — AGGRESSIVE REVIEW ---"
+        )
+
         print(gemini_review)
 
-        print("\n--- OPENROUTER — AGGRESSIVE REVIEW ---")
+        print(
+            "\n--- OPENROUTER — AGGRESSIVE REVIEW ---"
+        )
+
         print(openrouter_review)
 
-
         gemini_approved = (
-            gemini_review.strip().upper() == "APPROVED"
+            gemini_review.strip().upper()
+            == "APPROVED"
         )
 
         openrouter_approved = (
-            openrouter_review.strip().upper() == "APPROVED"
+            openrouter_review.strip().upper()
+            == "APPROVED"
         )
-
 
         # ----------------------------------------------------
         # BOTH APPROVE
@@ -610,40 +873,43 @@ Return ONLY the answer.
         if gemini_approved and openrouter_approved:
 
             print("\n" + "=" * 60)
-            print("BOTH AGENTS APPROVED THE SAME TEAM DRAFT")
+
+            print(
+                "BOTH AGENTS APPROVED THE SAME TEAM DRAFT"
+            )
+
             print("=" * 60)
 
             approved = True
+
             break
 
-
         # ----------------------------------------------------
-        # SOMEONE FOUND A REAL PROBLEM
+        # REVISION REQUIRED
         # ----------------------------------------------------
 
         print("\nREVISION REQUIRED.")
-
-        # Alternate who performs the actual revision.
-        # This keeps the two-agent architecture balanced.
 
         if approval_round % 2 == 1:
             revision_agent = "Gemini"
         else:
             revision_agent = "OpenRouter"
 
-        print(f"Revision performed by: {revision_agent}")
+        print(
+            f"Revision performed by: {revision_agent}"
+        )
 
         team_draft = revise_team_draft(
             question,
             team_draft,
             gemini_review,
             openrouter_review,
-            revision_agent
+            revision_agent,
+            conversation_context
         )
 
         print("\n--- REVISED TEAM DRAFT ---")
         print(team_draft)
-
 
     # ========================================================
     # STEP 5 — FINAL ANSWER
@@ -671,9 +937,128 @@ Return ONLY the answer.
         print("\nLatest team draft:")
         print(team_draft)
 
+    return team_draft
+
 
 # ============================================================
-# START
+# MAIN — AI TEAM CHATBOT
+# ============================================================
+
+def main():
+
+    print("\n" + "=" * 60)
+    print("             QUALITY AI TEAM CHATBOT")
+    print("=" * 60)
+
+    print(
+        "\nTwo AI agents will collaborate on every question."
+    )
+
+    print(
+        "Type 'exit', 'quit', or 'bye' to leave."
+    )
+
+    conversation_history = []
+
+    while True:
+
+        print("\n" + "-" * 60)
+
+        question = input("\nYou: ").strip()
+
+        # ----------------------------------------------------
+        # EXIT
+        # ----------------------------------------------------
+
+        if question.lower() in {
+            "exit",
+            "quit",
+            "bye"
+        }:
+
+            print("\n" + "=" * 60)
+            print("             EXITING AI TEAM")
+            print("=" * 60)
+
+            break
+
+        # ----------------------------------------------------
+        # EMPTY INPUT
+        # ----------------------------------------------------
+
+        if not question:
+
+            print(
+                "\nPlease enter a question."
+            )
+
+            continue
+
+        # ----------------------------------------------------
+        # PROCESS QUESTION
+        # ----------------------------------------------------
+
+        try:
+
+            final_answer = answer_question(
+                question,
+                conversation_history
+            )
+
+        except RuntimeError as error:
+
+            print("\n" + "=" * 60)
+            print("AI TEAM TEMPORARILY UNAVAILABLE")
+            print("=" * 60)
+
+            print(f"\n{error}")
+
+            print(
+                "\nYou can try your question again."
+            )
+
+            continue
+
+        except Exception as error:
+
+            print("\n" + "=" * 60)
+            print("UNEXPECTED ERROR")
+            print("=" * 60)
+
+            print(
+                f"\n{error}"
+            )
+
+            print(
+                "\nThe chatbot is still running."
+            )
+
+            continue
+
+        # ----------------------------------------------------
+        # SAVE CONVERSATION
+        # ----------------------------------------------------
+
+        conversation_history.append(
+            {
+                "user": question,
+                "assistant": final_answer
+            }
+        )
+
+        # ----------------------------------------------------
+        # LIMIT CONTEXT
+        # ----------------------------------------------------
+
+        if len(conversation_history) > MAX_CONTEXT_TURNS:
+
+            conversation_history = (
+                conversation_history[-MAX_CONTEXT_TURNS:]
+            )
+
+
+# ============================================================
+# START PROGRAM
 # ============================================================
 
 if __name__ == "__main__":
