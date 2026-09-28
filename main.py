@@ -27,10 +27,16 @@ OPENROUTER_MAX_RETRIES = 4
 # ============================================================
 
 def ask_gemini(prompt):
+
     response = gemini_client.models.generate_content(
         model="gemini-3.5-flash-lite",
         contents=prompt
     )
+
+    if not response.text:
+        raise RuntimeError(
+            "Gemini returned an empty response."
+        )
 
     return response.text.strip()
 
@@ -47,14 +53,17 @@ def ask_openrouter(prompt):
 
             response = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
+
                 headers={
                     "Authorization": (
                         f"Bearer {os.getenv('OPENROUTER_API_KEY')}"
                     ),
                     "Content-Type": "application/json"
                 },
+
                 json={
                     "model": "openrouter/free",
+
                     "messages": [
                         {
                             "role": "user",
@@ -62,6 +71,7 @@ def ask_openrouter(prompt):
                         }
                     ]
                 },
+
                 timeout=120
             )
 
@@ -105,7 +115,20 @@ def ask_openrouter(prompt):
 
             data = response.json()
 
-            return data["choices"][0]["message"]["content"].strip()
+            content = (
+                data
+                .get("choices", [{}])[0]
+                .get("message", {})
+                .get("content")
+            )
+
+            if not content:
+
+                raise RuntimeError(
+                    "OpenRouter returned an empty response."
+                )
+
+            return content.strip()
 
         except requests.exceptions.Timeout:
 
@@ -291,9 +314,14 @@ NO_MEANINGFUL_IMPROVEMENT
 """
 
     if agent_name == "Gemini":
-        return ask_gemini(prompt)
+        result = ask_gemini(prompt)
+    else:
+        result = ask_openrouter(prompt)
 
-    return ask_openrouter(prompt)
+    if not result:
+        return "NO_MEANINGFUL_IMPROVEMENT"
+
+    return result.strip()
 
 
 # ============================================================
@@ -361,9 +389,14 @@ Return ONLY the improved answer.
 """
 
     if agent_name == "Gemini":
-        return ask_gemini(prompt)
+        result = ask_gemini(prompt)
+    else:
+        result = ask_openrouter(prompt)
 
-    return ask_openrouter(prompt)
+    if not result:
+        return current_answer
+
+    return result.strip()
 
 
 # ============================================================
@@ -434,11 +467,18 @@ for the user.
 Return ONLY the team draft.
 """
 
-    return ask_gemini(prompt)
+    result = ask_gemini(prompt)
+
+    if not result:
+        raise RuntimeError(
+            "Team draft generation returned an empty response."
+        )
+
+    return result.strip()
 
 
 # ============================================================
-# AGGRESSIVE TEAM DRAFT REVIEW
+# TEAM DRAFT REVIEW
 # ============================================================
 
 def review_team_draft(
@@ -514,10 +554,24 @@ APPROVED
 Do not rewrite the draft.
 """
 
-    if agent_name == "Gemini":
-        return ask_gemini(prompt)
+    # --------------------------------------------------------
+    # IMPORTANT FIX:
+    # Always store the response first.
+    # If the API gives nothing, return a safe review.
+    # --------------------------------------------------------
 
-    return ask_openrouter(prompt)
+    if agent_name == "Gemini":
+        result = ask_gemini(prompt)
+    else:
+        result = ask_openrouter(prompt)
+
+    if not result:
+        return (
+            "REVISE:\n"
+            "The review service did not return a response."
+        )
+
+    return result.strip()
 
 
 # ============================================================
@@ -587,9 +641,14 @@ Return ONLY the revised team draft.
 """
 
     if revision_agent == "Gemini":
-        return ask_gemini(prompt)
+        result = ask_gemini(prompt)
+    else:
+        result = ask_openrouter(prompt)
 
-    return ask_openrouter(prompt)
+    if not result:
+        return current_draft
+
+    return result.strip()
 
 
 # ============================================================
@@ -703,7 +762,6 @@ Return ONLY the answer.
         print("=" * 60)
 
         # ----------------------------------------------------
-        # IMPORTANT:
         # Both agents inspect the SAME previous state.
         # ----------------------------------------------------
 
@@ -855,6 +913,24 @@ Return ONLY the answer.
         )
 
         print(openrouter_review)
+
+        # ----------------------------------------------------
+        # IMPORTANT FIX:
+        #
+        # Prevent NoneType.strip() crash.
+        # ----------------------------------------------------
+
+        gemini_review = (
+            gemini_review
+            or
+            "REVISE:\nNo review was returned."
+        )
+
+        openrouter_review = (
+            openrouter_review
+            or
+            "REVISE:\nNo review was returned."
+        )
 
         gemini_approved = (
             gemini_review.strip().upper()
