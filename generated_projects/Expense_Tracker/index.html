@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Expense Tracker</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Expense Tracker</h1>
+    <form id="expense-form">
+      <label for="description">Description
+        <input type="text" id="description" required>
+      </label>
+      <label for="amount">Amount
+        <input type="number" id="amount" min="0" step="0.01" required>
+      </label>
+      <label for="category">Category
+        <select id="category" required>
+          <option value="" disabled selected>Choose...</option>
+          <option value="Food">Food</option>
+          <option value="Transport">Transport</option>
+          <option value="Utilities">Utilities</option>
+          <option value="Entertainment">Entertainment</option>
+          <option value="Other">Other</option>
+        </select>
+      </label>
+      <label for="date">Date
+        <input type="date" id="date" required>
+      </label>
+      <button type="submit">Add Expense</button>
+    </form>
+    <div id="summary" class="card">
+      <h2>Summary</h2>
+      <p>Total: <span id="total-amount">$0.00</span></p>
+      <div id="category-breakdown"></div>
+    </div>
+    <div class="card">
+      <h2>Expense List</h2>
+      <div class="table-container">
+        <table id="expense-table">
+          <thead>
+            <tr>
+              <th>Description</th>
+              <th>Category</th>
+              <th>Date</th>
+              <th>Amount</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="expense-list"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <script src="script.js"></script>
+</body>
+</html>

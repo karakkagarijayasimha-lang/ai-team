@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Expense Tracker</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>Expense Tracker</h1>
+    </header>
+    <main class="container">
+        <section class="dashboard" id="dashboard">
+            <h2>Dashboard</h2>
+            <div class="summary-cards">
+                <div class="card">
+                    <h3>Total Expenses</h3>
+                    <p id="total-amount">$0.00</p>
+                </div>
+            </div>
+            <div id="category-breakdown" class="category-breakdown">
+                <!-- Category breakdown will be dynamically rendered here -->
+            </div>
+        </section>
+
+        <section class="form-section">
+            <h2>Add New Expense</h2>
+            <form id="expense-form">
+                <div class="form-group">
+                    <label for="description">Description</label>
+                    <input type="text" id="description" required placeholder="e.g., Grocery shopping">
+                </div>
+                <div class="form-group">
+                    <label for="amount">Amount ($)</label>
+                    <input type="number" id="amount" step="0.01" min="0.01" required placeholder="0.00">
+                </div>
+                <div class="form-group">
+                    <label for="date">Date</label>
+                    <input type="date" id="date" required>
+                </div>
+                <div class="form-group">
+                    <label for="category">Category</label>
+                    <select id="category" required>
+                        <option value="">Select Category</option>
+                        <option value="Food">Food</option>
+                        <option value="Transport">Transport</option>
+                        <option value="Housing">Housing</option>
+                        <option value="Entertainment">Entertainment</option>
+                        <option value="Utilities">Utilities</option>
+                        <option value="Others">Others</option>
+                    </select>
+                </div>
+                <button type="submit" id="submit-btn" class="btn-primary">Add Expense</button>
+            </form>
+        </section>
+
+        <section class="list-section">
+            <h2>Expense History</h2>
+            <div class="table-responsive">
+                <table id="expense-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Description</th>
+                            <th>Category</th>
+                            <th>Amount</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="expense-list">
+                        <!-- Dynamic expense items will be rendered here -->
+                    </tbody>
+                </table>
+            </div>
+            <p id="no-expenses-msg" class="hidden">No expenses recorded yet.</p>
+        </section>
+    </main>
+    <script src="script.js"></script>
+</body>
+</html>

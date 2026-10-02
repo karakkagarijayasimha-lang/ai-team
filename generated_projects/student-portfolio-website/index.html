@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Portfolio</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Header & Navigation Bar -->
+    <header>
+        <nav class="nav-bar">
+            <div class="nav-brand">
+                <a href="#hero">Portfolio.</a>
+            </div>
+            <ul class="nav-links">
+                <li><a href="#about">About</a></li>
+                <li><a href="#skills">Skills</a></li>
+                <li><a href="#projects">Projects</a></li>
+                <li><a href="#contact">Contact</a></li>
+            </ul>
+            <button class="hamburger" aria-label="Toggle navigation menu" aria-expanded="false">
+                <span class="bar"></span>
+                <span class="bar"></span>
+                <span class="bar"></span>
+            </button>
+        </nav>
+    </header>
+
+    <!-- Main Content Area -->
+    <main>
+        <!-- Hero Section -->
+        <section id="hero" class="hero-section">
+            <div class="hero-content">
+                <h1>Hi, I'm <span class="highlight">Alex Doe</span></h1>
+                <p class="hero-subhead">Computer Science Student & Aspiring Web Developer</p>
+                <div class="hero-cta">
+                    <a href="#projects" class="btn btn-primary">View Projects</a>
+                    <a href="#contact" class="btn btn-secondary">Contact Me</a>
+                </div>
+            </div>
+        </section>
+
+        <!-- About Section -->
+        <section id="about" class="about-section">
+            <div class="container">
+                <h2>About Me</h2>
+                <div class="about-content">
+                    <div class="about-text">
+                        <p>Hello! I am a passionate student currently pursuing my degree in Computer Science. I love building digital experiences that live on the internet, ranging from intuitive user interfaces to robust backend solutions.</p>
+                        <p>When I'm not coding, you can find me exploring new open-source projects, reading about emerging tech trends, or participating in university hackathons.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Skills Section -->
+        <section id="skills" class="skills-section">
+            <div class="container">
+                <h2>Skills & Technologies</h2>
+                <div class="skills-grid">
+                    <span class="skill-chip">HTML5</span>
+                    <span class="skill-chip">CSS3</span>
+                    <span class="skill-chip">JavaScript (ES6+)</span>
+                    <span class="skill-chip">React</span>
+                    <span class="skill-chip">Git & GitHub</span>
+                    <span class="skill-chip">Python</span>
+                    <span class="skill-chip">Java</span>
+                    <span class="skill-chip">Responsive Design</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- Projects Section -->
+        <section id="projects" class="projects-section">
+            <div class="container">
+                <h2>Featured Projects</h2>
+                <div class="projects-grid">
+                    <!-- Project Card 1 -->
+                    <div class="project-card">
+                        <h3>Campus Event Manager</h3>
+                        <p>A web application designed for students to discover, RSVP, and organize university events in real-time.</p>
+                        <div class="project-tags">
+                            <span>HTML</span>
+                            <span>CSS</span>
+                            <span>JavaScript</span>
+                        </div>
+                        <div class="project-links">
+                            <a href="javascript:void(0)" onclick="alert('Live demo link not available yet.')">Live Demo</a>
+                            <a href="javascript:void(0)" onclick="alert('GitHub link not available yet.')">GitHub</a>
+                        </div>
+                    </div>
+                    <!-- Project Card 2 -->
+                    <div class="project-card">
+                        <h3>Study Buddy Finder</h3>
+                        <p>A matching platform connecting students based on courses, study habits, and academic schedules.</p>
+                        <div class="project-tags">
+                            <span>React</span>
+                            <span>Node.js</span>
+                            <span>CSS</span>
+                        </div>
+                        <div class="project-links">
+                            <a href="javascript:void(0)" onclick="alert('Live demo link not available yet.')">Live Demo</a>
+                            <a href="javascript:void(0)" onclick="alert('GitHub link not available yet.')">GitHub</a>
+                        </div>
+                    </div>
+                    <!-- Project Card 3 -->
+                    <div class="project-card">
+                        <h3>Algorithmic Visualizer</h3>
+                        <p>An interactive educational tool that visualizes sorting and pathfinding algorithms step-by-step.</p>
+                        <div class="project-tags">
+                            <span>JavaScript</span>
+                            <span>HTML5 Canvas</span>
+                            <span>CSS</span>
+                        </div>
+                        <div class="project-links">
+                            <a href="javascript:void(0)" onclick="alert('Live demo link not available yet.')">Live Demo</a>
+                            <a href="javascript:void(0)" onclick="alert('GitHub link not available yet.')">GitHub</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Contact Section -->
+        <section id="contact" class="contact-section">
+            <div class="container">
+                <h2>Get In Touch</h2>
+                <p class="contact-intro">Have a project in mind, an opportunity, or just want to say hi? Feel free to drop a message!</p>
+                <form id="contact-form" class="contact-form">
+                    <div class="form-group">
+                        <label for="name">Name</label>
+                        <input type="text" id="name" name="name" required placeholder="Your Name">
+                        <span class="error-message" id="name-error"></span>
+                    </div>
+                    <div class="form-group">
+                        <label for="email">Email</label>
+                        <input type="email" id="email" name="email" required placeholder="your.email@example.com">
+                        <span class="error-message" id="email-error"></span>
+                    </div>
+                    <div class="form-group">
+                        <label for="message">Message</label>
+                        <textarea id="message" name="message" rows="5" required placeholder="Your message here..."></textarea>
+                        <span class="error-message" id="message-error"></span>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Send Message</button>
+                    <div id="form-success" class="form-success" style="display: none;">Thank you! Your message has been sent successfully.</div>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 Alex Doe. Built with HTML, CSS, and Vanilla JavaScript.</p>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
